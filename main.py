@@ -1,0 +1,304 @@
+"""
+RAN Assistente — Bot Telegram 24/7
+Deploy: Render (gratuito) via webhook
+"""
+
+import os, json, logging
+from datetime import datetime, timedelta
+import httpx
+from telegram import Update
+from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
+from googleapiclient.discovery import build
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# ── Configurações ──────────────────────────────────────────────────────────────
+BOT_TOKEN     = os.environ["BOT_TOKEN"]
+CHAT_ID       = int(os.environ["CHAT_ID"])
+GROQ_KEY      = os.environ["GROQ_KEY"]
+ANTHROPIC_KEY = os.environ["ANTHROPIC_KEY"]
+WEBHOOK_URL   = os.environ["WEBHOOK_URL"]  # ex: https://ran-bot.onrender.com
+
+GOOGLE_CLIENT_ID     = os.environ["GOOGLE_CLIENT_ID"]
+GOOGLE_CLIENT_SECRET = os.environ["GOOGLE_CLIENT_SECRET"]
+GOOGLE_REFRESH_TOKEN = os.environ["GOOGLE_REFRESH_TOKEN"]
+
+PENDENTES_FILE = "/tmp/email_pendentes.json"
+PNCP_BASE      = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+
+# ── Google Auth ────────────────────────────────────────────────────────────────
+def get_google_creds():
+    creds = Credentials(
+        token=None,
+        refresh_token=GOOGLE_REFRESH_TOKEN,
+        client_id=GOOGLE_CLIENT_ID,
+        client_secret=GOOGLE_CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=[
+            "https://www.googleapis.com/auth/gmail.modify",
+            "https://www.googleapis.com/auth/calendar",
+            "https://www.googleapis.com/auth/tasks",
+        ]
+    )
+    creds.refresh(Request())
+    return creds
+
+def gmail_service():    return build("gmail",    "v1", credentials=get_google_creds())
+def calendar_service(): return build("calendar", "v3", credentials=get_google_creds())
+def tasks_service():    return build("tasks",    "v1", credentials=get_google_creds())
+
+# ── Telegram helper ────────────────────────────────────────────────────────────
+async def send(text: str, bot):
+    await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="Markdown")
+
+# ── Groq Whisper ───────────────────────────────────────────────────────────────
+async def transcribe_voice(file_path_url: str) -> str:
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.get(file_path_url)
+        audio_bytes = r.content
+    async with httpx.AsyncClient(timeout=60) as client:
+        r = await client.post(
+            "https://api.groq.com/openai/v1/audio/transcriptions",
+            headers={"Authorization": f"Bearer {GROQ_KEY}"},
+            files={"file": ("voice.ogg", audio_bytes, "audio/ogg")},
+            data={"model": "whisper-large-v3-turbo", "language": "pt"},
+        )
+        return r.json().get("text", "")
+
+# ── Claude — classificar intenção ───────────────────────────────────────────────
+async def classify_intent(text: str) -> dict:
+    hoje = datetime.now().strftime("%Y-%m-%d")
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 300,
+                "system": f"""Classifica mensagens em português do Ryan Bereta.
+Data de hoje: {hoje}. Fuso: America/Sao_Paulo.
+
+Responda APENAS JSON válido, sem markdown:
+{{
+  "tipo": "TAREFA"|"EVENTO"|"EMAIL"|"ATAS_ES"|"EMAIL_CMD"|"DESCONHECIDO",
+  "titulo": "título limpo",
+  "data": "YYYY-MM-DD ou null",
+  "hora": "HH:MM ou null",
+  "destinatario": "email ou null",
+  "assunto": "assunto ou null",
+  "corpo": "corpo do email ou null",
+  "cmd_num": numero_ou_null,
+  "cmd_acao": "ok"|"muda"|"ignora"|null,
+  "cmd_instrucao": "instrução ou null"
+}}
+
+Regras:
+- EVENTO: tem data/hora/dia semana, ou palavras: reunião, meeting, call, almoço, jantar, visita, consulta, compromisso
+- TAREFA: verbos de ação sem data específica: ligar, pagar, comprar, enviar, fazer, verificar, lembrar
+- EMAIL: "envia email", "manda email", "escreve email" para alguém
+- ATAS_ES: "atas es", "atas espírito santo", "atas estadual", "atas federal", "atas consórcio"
+- EMAIL_CMD: começa com "ok N", "envia N", "muda N:", "ignora N"
+- Datas relativas: amanhã=+1 dia, dias da semana=próxima ocorrência futura""",
+                "messages": [{"role": "user", "content": text}],
+            },
+        )
+        content = r.json()["content"][0]["text"].strip()
+        return json.loads(content)
+
+# ── Ações Google ───────────────────────────────────────────────────────────────
+def criar_tarefa(titulo: str, data: str = None) -> None:
+    svc = tasks_service()
+    listas = svc.tasklists().list().execute().get("items", [])
+    lista_id = next((l["id"] for l in listas if "RYAN" in l["title"].upper()), listas[0]["id"])
+    body = {"title": titulo}
+    if data:
+        body["due"] = f"{data}T00:00:00.000Z"
+    svc.tasks().insert(tasklist=lista_id, body=body).execute()
+
+def criar_evento(titulo: str, data: str, hora: str = None) -> None:
+    svc = calendar_service()
+    if hora:
+        start_dt = f"{data}T{hora}:00"
+        end_obj  = datetime.strptime(f"{data} {hora}", "%Y-%m-%d %H:%M") + timedelta(hours=1)
+        end_dt   = end_obj.strftime("%Y-%m-%dT%H:%M:00")
+        start = {"dateTime": start_dt, "timeZone": "America/Sao_Paulo"}
+        end   = {"dateTime": end_dt,   "timeZone": "America/Sao_Paulo"}
+    else:
+        start = end = {"date": data}
+    svc.events().insert(calendarId="primary", body={"summary": titulo, "start": start, "end": end}).execute()
+
+def criar_rascunho(para: str, assunto: str, corpo: str) -> None:
+    import base64
+    from email.mime.text import MIMEText
+    svc = gmail_service()
+    msg = MIMEText(corpo, "plain", "utf-8")
+    msg["to"] = para
+    msg["subject"] = assunto
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    svc.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
+
+# ── Busca PNCP ES ───────────────────────────────────────────────────────────────
+async def buscar_atas_es(filtro: str = "") -> str:
+    hoje = datetime.now().strftime("%Y%m%d")
+    res  = {"estadual": [], "federal": [], "consorcio": []}
+    CKW  = ["consorcio", "consórcio", "cim", "polinorte"]
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        for pagina in range(1, 30):
+            try:
+                r = await client.get(PNCP_BASE, params={
+                    "dataInicial": "20260101", "dataFinal": hoje,
+                    "pagina": pagina, "tamanhoPagina": 10,
+                    "codigoModalidadeContratacao": 6, "uf": "ES",
+                })
+                items = r.json().get("data", [])
+            except Exception:
+                break
+            if not items:
+                break
+            for item in items:
+                if not item.get("srp"):
+                    continue
+                esfera = item.get("orgaoEntidade", {}).get("esferaId", "")
+                orgao  = item.get("orgaoEntidade", {}).get("razaoSocial", "")
+                objeto = item.get("objetoCompra", "")
+                cnpj   = item.get("orgaoEntidade", {}).get("cnpj", "")
+                ano    = item.get("anoCompra", "")
+                seq    = item.get("sequencialCompra", "")
+                if filtro and filtro.lower() not in objeto.lower():
+                    continue
+                entry = {"orgao": orgao[:50], "objeto": objeto[:80],
+                         "valor": item.get("valorTotalEstimado", 0),
+                         "link": f"https://pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}"}
+                if esfera == "E":
+                    res["estadual"].append(entry)
+                elif esfera == "F":
+                    res["federal"].append(entry)
+                elif esfera in ["N","M"] and any(k in orgao.lower() for k in CKW):
+                    res["consorcio"].append(entry)
+
+    total = sum(len(v) for v in res.values())
+    if not total:
+        return "❌ Nenhuma ata SRP encontrada no ES."
+
+    linhas = ["📋 *ATAS PNCP — Espírito Santo 2026*\n"]
+    for tipo, emoji in [("estadual","🏛️ ESTADUAIS"),("federal","🇧🇷 FEDERAIS"),("consorcio","🤝 CONSÓRCIOS")]:
+        lista = res[tipo]
+        if not lista: continue
+        linhas.append(f"\n*{emoji} ({len(lista)})*")
+        for i, r in enumerate(lista[:5], 1):
+            val = f"R$ {r['valor']:,.0f}".replace(",",".") if r["valor"] else "Valor n/d"
+            linhas += [f"\n{i}. {r['orgao']}", f"📌 {r['objeto']}", f"💰 {val}", f"🔗 {r['link']}"]
+        if len(lista) > 5:
+            linhas.append(f"_(+{len(lista)-5} atas)_")
+    return "\n".join(linhas)
+
+# ── Handler principal ───────────────────────────────────────────────────────────
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != CHAT_ID:
+        return
+
+    bot   = context.bot
+    texto = ""
+
+    if update.message.voice:
+        try:
+            file = await bot.get_file(update.message.voice.file_id)
+            url  = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
+            texto = await transcribe_voice(url)
+            if not texto:
+                await send("⚠️ Não consegui transcrever. Tente por texto.", bot)
+                return
+            await send(f'🎤 _"{texto}"_', bot)
+        except Exception as e:
+            await send(f"⚠️ Erro no áudio: {e}", bot)
+            return
+    elif update.message.text:
+        texto = update.message.text.strip()
+    else:
+        return
+
+    try:
+        intent = await classify_intent(texto)
+    except Exception as e:
+        await send(f"⚠️ Erro ao processar: {e}", bot)
+        return
+
+    tipo = intent.get("tipo", "DESCONHECIDO")
+
+    if tipo == "ATAS_ES":
+        await send("🔍 Buscando atas no PNCP...", bot)
+        await send(await buscar_atas_es(), bot)
+
+    elif tipo == "EMAIL":
+        try:
+            criar_rascunho(intent.get("destinatario",""), intent.get("assunto","Sem assunto"), intent.get("corpo",""))
+            await send(f"📧 *Email pronto!*\nPara: {intent.get('destinatario','')}\nAssunto: {intent.get('assunto','')}\n\n👆 Abra e envie:\nhttps://mail.google.com/mail/u/0/#drafts", bot)
+        except Exception as e:
+            await send(f"⚠️ Erro ao criar rascunho: {e}", bot)
+
+    elif tipo == "TAREFA":
+        try:
+            criar_tarefa(intent["titulo"], intent.get("data"))
+            msg = f"✅ *Tarefa criada:* {intent['titulo']}"
+            if intent.get("data"): msg += f"\n📅 Vence: {intent['data']}"
+            await send(msg, bot)
+        except Exception as e:
+            await send(f"⚠️ Erro ao criar tarefa: {e}", bot)
+
+    elif tipo == "EVENTO":
+        if not intent.get("data"):
+            await send("📅 Qual é a data do compromisso?", bot)
+            return
+        try:
+            criar_evento(intent["titulo"], intent["data"], intent.get("hora"))
+            hora_str = f" às {intent['hora']}" if intent.get("hora") else ""
+            await send(f"📅 *Evento criado:* {intent['titulo']}\n🗓️ {intent['data']}{hora_str}", bot)
+        except Exception as e:
+            await send(f"⚠️ Erro ao criar evento: {e}", bot)
+
+    elif tipo == "EMAIL_CMD":
+        try:
+            with open(PENDENTES_FILE) as f:
+                pendentes = json.load(f)
+        except Exception:
+            pendentes = []
+        num  = intent.get("cmd_num")
+        acao = intent.get("cmd_acao")
+        if not num or num > len(pendentes):
+            await send(f"⚠️ Email [{num}] não encontrado.", bot)
+            return
+        item = pendentes[num-1]
+        if acao == "ignora":
+            item["status"] = "ignorado"
+            await send(f"🗑️ Email [{num}] descartado.", bot)
+        elif acao in ("ok","envia"):
+            item["status"] = "enviado"
+            await send(f"✅ Abra o Gmail e envie:\n_{item.get('assunto','')}_\nhttps://mail.google.com/mail/u/0/#drafts", bot)
+        with open(PENDENTES_FILE, "w") as f:
+            json.dump(pendentes, f, ensure_ascii=False, indent=2)
+
+    else:
+        await send("🤔 Não entendi. Exemplos:\n• _reunião com Tiago sexta às 14h_\n• _ligar para o contador amanhã_\n• _envia email para joao@empresa.com assunto: Proposta_\n• _atas es_", bot)
+
+# ── Main com webhook ────────────────────────────────────────────────────────────
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(MessageHandler(filters.ALL, handle_message))
+    port = int(os.environ.get("PORT", 8443))
+    logger.info(f"Bot RAN iniciado via webhook na porta {port}")
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=port,
+        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
+    )
+
+if __name__ == "__main__":
+    main()
