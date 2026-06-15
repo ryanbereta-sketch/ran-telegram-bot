@@ -289,7 +289,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send("🤔 Não entendi. Exemplos:\n• _reunião com Tiago sexta às 14h_\n• _ligar para o contador amanhã_\n• _envia email para joao@empresa.com assunto: Proposta_\n• _atas es_", bot)
 
 # ── Main com webhook ────────────────────────────────────────────────────────────
+import asyncio
+
 def main():
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     port = int(os.environ.get("PORT", 8443))
