@@ -1,9 +1,9 @@
 """
 RAN Assistente — Bot Telegram 24/7
-Deploy: Render (gratuito) via webhook
+Deploy: Render (gratuito) via polling
 """
 
-import os, json, logging
+import os, json, logging, asyncio
 from datetime import datetime, timedelta
 import httpx
 from telegram import Update
@@ -20,7 +20,6 @@ BOT_TOKEN     = os.environ["BOT_TOKEN"]
 CHAT_ID       = int(os.environ["CHAT_ID"])
 GROQ_KEY      = os.environ["GROQ_KEY"]
 ANTHROPIC_KEY = os.environ["ANTHROPIC_KEY"]
-WEBHOOK_URL   = os.environ["WEBHOOK_URL"]  # ex: https://ran-bot.onrender.com
 
 GOOGLE_CLIENT_ID     = os.environ["GOOGLE_CLIENT_ID"]
 GOOGLE_CLIENT_SECRET = os.environ["GOOGLE_CLIENT_SECRET"]
@@ -288,21 +287,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await send("🤔 Não entendi. Exemplos:\n• _reunião com Tiago sexta às 14h_\n• _ligar para o contador amanhã_\n• _envia email para joao@empresa.com assunto: Proposta_\n• _atas es_", bot)
 
-# ── Main com webhook ────────────────────────────────────────────────────────────
-import asyncio
-
-def main():
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
+# ── Main com polling ────────────────────────────────────────────────────────────
+async def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, handle_message))
-    port = int(os.environ.get("PORT", 8443))
-    logger.info(f"Bot RAN iniciado via webhook na porta {port}")
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        webhook_url=f"{WEBHOOK_URL}/{BOT_TOKEN}",
-    )
+    logger.info("Bot RAN iniciado via polling")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(drop_pending_updates=True)
+    await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
