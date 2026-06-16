@@ -298,12 +298,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send("🤔 Não entendi. Exemplos:\n• _reunião com Tiago sexta às 14h_\n• _ligar para o contador amanhã_\n• _envia email para joao@empresa.com assunto: Proposta_\n• _atas es_", bot)
 
 # ── Main ────────────────────────────────────────────────────────────────────────
-def main():
-    start_health_server()
+async def run_bot():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     logger.info("Bot RAN iniciado via polling")
-    app.run_polling(drop_pending_updates=True)
+    async with app:
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        await asyncio.Event().wait()
 
 if __name__ == "__main__":
-    main()
+    start_health_server()
+    asyncio.run(run_bot())
