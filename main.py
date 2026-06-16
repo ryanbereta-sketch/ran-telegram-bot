@@ -1,10 +1,12 @@
 """
 RAN Assistente — Bot Telegram 24/7
-Deploy: Render (gratuito) via polling
+Deploy: Render (gratuito) via polling + health check HTTP
 """
 
 import os, json, logging, asyncio
 from datetime import datetime, timedelta
+from http.server import HTTPServer, BaseHTTPRequestHandler
+from threading import Thread
 import httpx
 from telegram import Update
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
@@ -15,7 +17,6 @@ from googleapiclient.discovery import build
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Configurações ──────────────────────────────────────────────────────────────
 BOT_TOKEN     = os.environ["BOT_TOKEN"]
 CHAT_ID       = int(os.environ["CHAT_ID"])
 GROQ_KEY      = os.environ["GROQ_KEY"]
@@ -27,6 +28,21 @@ GOOGLE_REFRESH_TOKEN = os.environ["GOOGLE_REFRESH_TOKEN"]
 
 PENDENTES_FILE = "/tmp/email_pendentes.json"
 PNCP_BASE      = "https://pncp.gov.br/api/consulta/v1/contratacoes/publicacao"
+
+# ── Health check HTTP (mantém Render acordado) ─────────────────────────────────
+class HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b"RAN Bot OK")
+    def log_message(self, *args):
+        pass
+
+def start_health_server():
+    port = int(os.environ.get("PORT", 10000))
+    server = HTTPServer(("0.0.0.0", port), HealthHandler)
+    Thread(target=server.serve_forever, daemon=True).start()
+    logger.info(f"Health check rodando na porta {port}")
 
 # ── Google Auth ────────────────────────────────────────────────────────────────
 def get_google_creds():
@@ -54,18 +70,18 @@ async def send(text: str, bot):
     await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="Markdown")
 
 # ── Groq Whisper ───────────────────────────────────────────────────────────────
-async def transcribe_voice(file_path_url: str) -> str:
+async def transcribe_voice(file_path: str) -> str:
+    url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.get(file_path_url)
+        r = await client.get(url)
         audio_bytes = r.content
-    async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.post(
+        r2 = await client.post(
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {GROQ_KEY}"},
             files={"file": ("voice.ogg", audio_bytes, "audio/ogg")},
             data={"model": "whisper-large-v3-turbo", "language": "pt"},
         )
-        return r.json().get("text", "")
+        return r2.json().get("text", "")
 
 # ── Claude — classificar intenção ───────────────────────────────────────────────
 async def classify_intent(text: str) -> dict:
@@ -144,11 +160,10 @@ def criar_rascunho(para: str, assunto: str, corpo: str) -> None:
     svc.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
 
 # ── Busca PNCP ES ───────────────────────────────────────────────────────────────
-async def buscar_atas_es(filtro: str = "") -> str:
+async def buscar_atas_es() -> str:
     hoje = datetime.now().strftime("%Y%m%d")
     res  = {"estadual": [], "federal": [], "consorcio": []}
     CKW  = ["consorcio", "consórcio", "cim", "polinorte"]
-
     async with httpx.AsyncClient(timeout=30) as client:
         for pagina in range(1, 30):
             try:
@@ -171,37 +186,33 @@ async def buscar_atas_es(filtro: str = "") -> str:
                 cnpj   = item.get("orgaoEntidade", {}).get("cnpj", "")
                 ano    = item.get("anoCompra", "")
                 seq    = item.get("sequencialCompra", "")
-                if filtro and filtro.lower() not in objeto.lower():
-                    continue
-                entry = {"orgao": orgao[:50], "objeto": objeto[:80],
-                         "valor": item.get("valorTotalEstimado", 0),
-                         "link": f"https://pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}"}
+                entry  = {"orgao": orgao[:50], "objeto": objeto[:80],
+                          "valor": item.get("valorTotalEstimado", 0),
+                          "link": f"https://pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}"}
                 if esfera == "E":
                     res["estadual"].append(entry)
                 elif esfera == "F":
                     res["federal"].append(entry)
                 elif esfera in ["N","M"] and any(k in orgao.lower() for k in CKW):
                     res["consorcio"].append(entry)
-
     total = sum(len(v) for v in res.values())
     if not total:
         return "❌ Nenhuma ata SRP encontrada no ES."
-
     linhas = ["📋 *ATAS PNCP — Espírito Santo 2026*\n"]
     for tipo, emoji in [("estadual","🏛️ ESTADUAIS"),("federal","🇧🇷 FEDERAIS"),("consorcio","🤝 CONSÓRCIOS")]:
         lista = res[tipo]
         if not lista: continue
         linhas.append(f"\n*{emoji} ({len(lista)})*")
-        for i, r in enumerate(lista[:5], 1):
-            val = f"R$ {r['valor']:,.0f}".replace(",",".") if r["valor"] else "Valor n/d"
-            linhas += [f"\n{i}. {r['orgao']}", f"📌 {r['objeto']}", f"💰 {val}", f"🔗 {r['link']}"]
+        for i, item in enumerate(lista[:5], 1):
+            val = f"R$ {item['valor']:,.0f}".replace(",",".") if item["valor"] else "Valor n/d"
+            linhas += [f"\n{i}. {item['orgao']}", f"📌 {item['objeto']}", f"💰 {val}", f"🔗 {item['link']}"]
         if len(lista) > 5:
             linhas.append(f"_(+{len(lista)-5} atas)_")
     return "\n".join(linhas)
 
 # ── Handler principal ───────────────────────────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.effective_chat.id != CHAT_ID:
+    if not update.message or update.effective_chat.id != CHAT_ID:
         return
 
     bot   = context.bot
@@ -210,8 +221,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message.voice:
         try:
             file = await bot.get_file(update.message.voice.file_id)
-            url  = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file.file_path}"
-            texto = await transcribe_voice(url)
+            texto = await transcribe_voice(file.file_path)
             if not texto:
                 await send("⚠️ Não consegui transcrever. Tente por texto.", bot)
                 return
@@ -287,15 +297,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await send("🤔 Não entendi. Exemplos:\n• _reunião com Tiago sexta às 14h_\n• _ligar para o contador amanhã_\n• _envia email para joao@empresa.com assunto: Proposta_\n• _atas es_", bot)
 
-# ── Main com polling ────────────────────────────────────────────────────────────
+# ── Main ────────────────────────────────────────────────────────────────────────
 async def main():
+    start_health_server()
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     logger.info("Bot RAN iniciado via polling")
-    await app.initialize()
-    await app.start()
-    await app.updater.start_polling(drop_pending_updates=True)
-    await asyncio.Event().wait()
+    async with app:
+        await app.start()
+        await app.updater.start_polling(drop_pending_updates=True)
+        await asyncio.Event().wait()
 
 if __name__ == "__main__":
     asyncio.run(main())
