@@ -95,7 +95,7 @@ async def classify_intent(text: str) -> dict:
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-3-haiku-20240307",
+                "model": "claude-3-5-haiku-20241022",
                 "max_tokens": 300,
                 "system": f"""Classifica mensagens em português do Ryan Bereta.
 Data de hoje: {hoje}. Fuso: America/Sao_Paulo.
