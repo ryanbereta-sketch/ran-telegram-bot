@@ -95,7 +95,7 @@ async def classify_intent(text: str) -> dict:
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-haiku-4-5-20251001",
+                "model": "claude-3-haiku-20240307",
                 "max_tokens": 300,
                 "system": f"""Classifica mensagens em português do Ryan Bereta.
 Data de hoje: {hoje}. Fuso: America/Sao_Paulo.
@@ -124,7 +124,10 @@ Regras:
                 "messages": [{"role": "user", "content": text}],
             },
         )
-        content = r.json()["content"][0]["text"].strip()
+        resp = r.json()
+        if "error" in resp:
+            raise Exception(resp["error"].get("message", str(resp["error"])))
+        content = resp["content"][0]["text"].strip()
         return json.loads(content)
 
 # ── Ações Google ───────────────────────────────────────────────────────────────
