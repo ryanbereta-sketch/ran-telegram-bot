@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: ran-telegram-bot
+    runtime: python
+    buildCommand: pip install --use-deprecated=legacy-resolver -r requirements.txt
+    startCommand: python main.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
