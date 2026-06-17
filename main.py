@@ -462,7 +462,9 @@ async def gerar_briefing_semana(bot) -> None:
     except Exception as ex:
         logger.error(f"Briefing semana Tasks erro: {ex}")
 
-    await bot.send_message(chat_id=CHAT_ID, text="\n".join(linhas), parse_mode="Markdown")
+    texto = "\n".join(linhas)
+    for i in range(0, len(texto), 4000):
+        await bot.send_message(chat_id=CHAT_ID, text=texto[i:i+4000], parse_mode="Markdown")
 
 async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.id != CHAT_ID:
