@@ -114,7 +114,7 @@ Data de hoje: {hoje}. Fuso: America/Sao_Paulo.
 
 Responda APENAS JSON válido, sem markdown:
 {{
-  "tipo": "TAREFA"|"EVENTO"|"EMAIL"|"ATAS_ES"|"EMAIL_CMD"|"DESCONHECIDO",
+  "tipo": "TAREFA"|"EVENTO"|"EMAIL"|"ATAS_ES"|"EMAIL_CMD"|"BRIEFING"|"BRIEFING_SEMANA"|"DESCONHECIDO",
   "titulo": "título limpo",
   "data": "YYYY-MM-DD ou null",
   "hora": "HH:MM ou null",
