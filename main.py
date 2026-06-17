@@ -337,6 +337,64 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
+# ── Briefing Matinal ───────────────────────────────────────────────────────────
+async def gerar_briefing(bot) -> None:
+    hoje = datetime.now()
+    hoje_str = hoje.strftime("%d/%m/%Y")
+    linhas = [f"☀️ *Bom dia, Ryan!*\n📅 {hoje_str}\n"]
+
+    # Eventos do dia no Calendar
+    try:
+        svc = calendar_service()
+        inicio = hoje.strftime("%Y-%m-%dT00:00:00-03:00")
+        fim    = hoje.strftime("%Y-%m-%dT23:59:59-03:00")
+        eventos = svc.events().list(
+            calendarId="primary", timeMin=inicio, timeMax=fim,
+            singleEvents=True, orderBy="startTime"
+        ).execute().get("items", [])
+        if eventos:
+            linhas.append("*📅 Compromissos de hoje:*")
+            for e in eventos:
+                hora = e["start"].get("dateTime", "")
+                hora_fmt = datetime.fromisoformat(hora).strftime("%H:%M") if hora else "Dia todo"
+                linhas.append(f"• {hora_fmt} — {e.get('summary','Sem título')}")
+        else:
+            linhas.append("📅 Nenhum compromisso hoje.")
+    except Exception as ex:
+        logger.error(f"Briefing Calendar erro: {ex}")
+
+    # Tarefas pendentes
+    try:
+        svc = tasks_service()
+        listas = svc.tasklists().list().execute().get("items", [])
+        lista_id = next((l["id"] for l in listas if "ASSISTENTE" in l["title"].upper()), listas[0]["id"])
+        tarefas = svc.tasks().list(tasklist=lista_id, showCompleted=False).execute().get("items", [])
+        pendentes = [t for t in tarefas if t.get("status") != "completed"]
+        if pendentes:
+            linhas.append("\n*✅ Tarefas pendentes:*")
+            for t in pendentes[:10]:
+                linhas.append(f"• {t.get('title','')}")
+        else:
+            linhas.append("\n✅ Nenhuma tarefa pendente.")
+    except Exception as ex:
+        logger.error(f"Briefing Tasks erro: {ex}")
+
+    linhas.append("\n_Bom trabalho! 💪_")
+    await bot.send_message(chat_id=CHAT_ID, text="\n".join(linhas), parse_mode="Markdown")
+
+async def agendador_briefing(bot) -> None:
+    enviado_hoje = None
+    while True:
+        agora = datetime.now()
+        if agora.hour == 7 and agora.minute < 5 and agora.date() != enviado_hoje:
+            try:
+                await gerar_briefing(bot)
+                enviado_hoje = agora.date()
+                logger.info("Briefing matinal enviado")
+            except Exception as e:
+                logger.error(f"Erro no briefing: {e}")
+        await asyncio.sleep(60)
+
 # ── Main ────────────────────────────────────────────────────────────────────────
 async def run_bot():
     app = Application.builder().token(BOT_TOKEN).build()
@@ -344,6 +402,7 @@ async def run_bot():
     logger.info("Bot RAN iniciado via polling")
     async with app:
         await app.start()
+        asyncio.create_task(agendador_briefing(app.bot))
         await app.updater.start_polling(drop_pending_updates=True)
         await asyncio.Event().wait()
 
