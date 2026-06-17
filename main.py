@@ -88,9 +88,27 @@ async def transcribe_voice(tg_file) -> str:
             raise Exception(f"Groq {r.status_code}: {r.json().get('error', {}).get('message', r.text)}")
         return r.json().get("text", "")
 
+# ── Pré-processar datas relativas ──────────────────────────────────────────────
+def preprocessar_datas(text: str) -> str:
+    from datetime import date
+    import re
+    hoje = date.today()
+    amanha = hoje + timedelta(days=1)
+    dias_semana = ["segunda","terça","quarta","quinta","sexta","sábado","domingo"]
+    text2 = text.lower()
+    text2 = re.sub(r'\bhoje\b', hoje.strftime("%d/%m/%Y"), text2)
+    text2 = re.sub(r'\bamanhã\b', amanha.strftime("%d/%m/%Y"), text2)
+    for i, dia in enumerate(dias_semana):
+        if dia in text2:
+            dias_ate = (i - hoje.weekday()) % 7 or 7
+            data_dia = hoje + timedelta(days=dias_ate)
+            text2 = text2.replace(dia, data_dia.strftime("%d/%m/%Y"))
+    return text2
+
 # ── Groq — classificar intenção ────────────────────────────────────────────────
 async def classify_intent(text: str) -> dict:
     hoje = datetime.now().strftime("%Y-%m-%d")
+    text = preprocessar_datas(text)
     system = f"""Classifica mensagens em português do Ryan Bereta.
 Data de hoje: {hoje}. Fuso: America/Sao_Paulo.
 
