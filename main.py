@@ -379,6 +379,30 @@ async def gerar_briefing(bot) -> None:
     except Exception as ex:
         logger.error(f"Briefing Tasks erro: {ex}")
 
+    # Emails não lidos
+    try:
+        svc = gmail_service()
+        msgs = svc.users().messages().list(
+            userId="me", q="is:unread is:inbox", maxResults=10
+        ).execute().get("messages", [])
+        if msgs:
+            linhas.append(f"\n*📧 Emails não lidos: {len(msgs)}*")
+            for m in msgs[:5]:
+                detail = svc.users().messages().get(
+                    userId="me", id=m["id"], format="metadata",
+                    metadataHeaders=["From","Subject"]
+                ).execute()
+                headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
+                remetente = headers.get("From","").split("<")[0].strip()[:30]
+                assunto   = headers.get("Subject","Sem assunto")[:50]
+                linhas.append(f"• {remetente}: _{assunto}_")
+            if len(msgs) > 5:
+                linhas.append(f"_(+{len(msgs)-5} emails)_")
+        else:
+            linhas.append("\n📧 Nenhum email não lido.")
+    except Exception as ex:
+        logger.error(f"Briefing Gmail erro: {ex}")
+
     linhas.append("\n_Bom trabalho! 💪_")
     await bot.send_message(chat_id=CHAT_ID, text="\n".join(linhas), parse_mode="Markdown")
 
