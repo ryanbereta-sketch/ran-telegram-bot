@@ -133,6 +133,7 @@ Regras:
 - EMAIL: "envia email", "manda email", "escreve email" para alguém
 - ATAS_ES: "atas es", "atas espírito santo", "atas estadual", "atas federal", "atas consórcio"
 - BRIEFING: "briefing", "resumo do dia", "resumo de hoje", "meu dia", "o que tenho hoje"
+- BRIEFING_SEMANA: "resumo da semana", "o que tenho essa semana", "agenda da semana", "semana"
 - EMAIL_CMD: começa com "ok N", "envia N", "muda N:", "ignora N"
 - Datas relativas: amanhã=+1 dia, dias da semana=próxima ocorrência futura"""
     async with httpx.AsyncClient(timeout=30) as client:
@@ -280,6 +281,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await send("⏳ Gerando seu briefing...", bot)
             await gerar_briefing(bot)
 
+        elif tipo == "BRIEFING_SEMANA":
+            await send("⏳ Gerando resumo da semana...", bot)
+            await gerar_briefing_semana(bot)
+
         elif tipo == "ATAS_ES":
             await send("🔍 Buscando atas no PNCP...", bot)
             await send(await buscar_atas_es(), bot)
@@ -409,6 +414,54 @@ async def gerar_briefing(bot) -> None:
         logger.error(f"Briefing Gmail erro: {ex}")
 
     linhas.append("\n_Bom trabalho! 💪_")
+    await bot.send_message(chat_id=CHAT_ID, text="\n".join(linhas), parse_mode="Markdown")
+
+async def gerar_briefing_semana(bot) -> None:
+    hoje = datetime.now()
+    inicio_semana = hoje - timedelta(days=hoje.weekday())
+    fim_semana    = inicio_semana + timedelta(days=6)
+    linhas = [f"📆 *Resumo da Semana*\n{inicio_semana.strftime('%d/%m')} a {fim_semana.strftime('%d/%m/%Y')}\n"]
+
+    try:
+        svc = calendar_service()
+        inicio = inicio_semana.strftime("%Y-%m-%dT00:00:00-03:00")
+        fim    = fim_semana.strftime("%Y-%m-%dT23:59:59-03:00")
+        eventos = svc.events().list(
+            calendarId="primary", timeMin=inicio, timeMax=fim,
+            singleEvents=True, orderBy="startTime"
+        ).execute().get("items", [])
+        if eventos:
+            linhas.append("*📅 Compromissos da semana:*")
+            dia_atual = None
+            for e in eventos:
+                dt_str = e["start"].get("dateTime") or e["start"].get("date")
+                dt = datetime.fromisoformat(dt_str)
+                dia = dt.strftime("%A %d/%m").capitalize()
+                if dia != dia_atual:
+                    linhas.append(f"\n*{dia}*")
+                    dia_atual = dia
+                hora = dt.strftime("%H:%M") if "T" in dt_str else "Dia todo"
+                linhas.append(f"• {hora} — {e.get('summary','Sem título')}")
+        else:
+            linhas.append("📅 Nenhum compromisso essa semana.")
+    except Exception as ex:
+        logger.error(f"Briefing semana Calendar erro: {ex}")
+
+    try:
+        svc = tasks_service()
+        listas = svc.tasklists().list().execute().get("items", [])
+        lista_id = next((l["id"] for l in listas if "ASSISTENTE" in l["title"].upper()), listas[0]["id"])
+        tarefas = svc.tasks().list(tasklist=lista_id, showCompleted=False).execute().get("items", [])
+        pendentes = [t for t in tarefas if t.get("status") != "completed"]
+        if pendentes:
+            linhas.append(f"\n*✅ Tarefas pendentes ({len(pendentes)}):*")
+            for t in pendentes[:10]:
+                linhas.append(f"• {t.get('title','')}")
+        else:
+            linhas.append("\n✅ Nenhuma tarefa pendente.")
+    except Exception as ex:
+        logger.error(f"Briefing semana Tasks erro: {ex}")
+
     await bot.send_message(chat_id=CHAT_ID, text="\n".join(linhas), parse_mode="Markdown")
 
 async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
