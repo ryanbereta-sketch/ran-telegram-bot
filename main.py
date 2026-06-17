@@ -70,23 +70,17 @@ async def send(text: str, bot):
     await bot.send_message(chat_id=CHAT_ID, text=text, parse_mode="Markdown")
 
 # ── Groq Whisper ───────────────────────────────────────────────────────────────
-async def transcribe_voice(file_path: str) -> str:
-    # PTB 21.x retorna file_path como URL completa
-    url = file_path if file_path.startswith("https://") else f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+async def transcribe_voice(tg_file) -> str:
+    audio_bytes = bytes(await tg_file.download_as_bytearray())
     async with httpx.AsyncClient(timeout=60) as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        audio_bytes = r.content
-        r2 = await client.post(
+        r = await client.post(
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {GROQ_KEY}"},
-            files={"file": ("voice.ogg", audio_bytes, "audio/ogg")},
+            files={"file": ("voice.oga", audio_bytes, "audio/ogg")},
             data={"model": "whisper-large-v3-turbo", "language": "pt"},
         )
-        r2.raise_for_status()
-        result = r2.json()
-        logger.info(f"Groq transcription result: {result}")
-        return result.get("text", "")
+        r.raise_for_status()
+        return r.json().get("text", "")
 
 # ── Groq — classificar intenção ────────────────────────────────────────────────
 async def classify_intent(text: str) -> dict:
@@ -229,8 +223,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if update.message.voice:
         try:
-            file = await bot.get_file(update.message.voice.file_id)
-            texto = await transcribe_voice(file.file_path)
+            tg_file = await bot.get_file(update.message.voice.file_id)
+            texto = await transcribe_voice(tg_file)
             if not texto:
                 await send("⚠️ Não consegui transcrever. Tente por texto.", bot)
                 return
