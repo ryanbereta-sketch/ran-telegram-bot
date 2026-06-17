@@ -71,15 +71,20 @@ async def send(text: str, bot):
 
 # ── Groq Whisper ───────────────────────────────────────────────────────────────
 async def transcribe_voice(tg_file) -> str:
-    audio_bytes = bytes(await tg_file.download_as_bytearray())
+    path = "/tmp/voice.oga"
+    await tg_file.download_to_drive(path)
+    with open(path, "rb") as f:
+        audio_bytes = f.read()
+    logger.info(f"Audio size: {len(audio_bytes)} bytes")
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
             "https://api.groq.com/openai/v1/audio/transcriptions",
             headers={"Authorization": f"Bearer {GROQ_KEY}"},
             files={"file": ("voice.oga", audio_bytes, "audio/ogg")},
-            data={"model": "whisper-large-v3-turbo", "language": "pt"},
+            data={"model": "whisper-large-v3", "language": "pt"},
         )
-        r.raise_for_status()
+        if r.status_code != 200:
+            raise Exception(f"Groq erro {r.status_code}: {r.text}")
         return r.json().get("text", "")
 
 # ── Groq — classificar intenção ────────────────────────────────────────────────
