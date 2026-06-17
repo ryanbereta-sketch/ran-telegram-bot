@@ -132,6 +132,7 @@ Regras:
 - TAREFA: verbos de ação sem data específica: ligar, pagar, comprar, enviar, fazer, verificar, lembrar
 - EMAIL: "envia email", "manda email", "escreve email" para alguém
 - ATAS_ES: "atas es", "atas espírito santo", "atas estadual", "atas federal", "atas consórcio"
+- BRIEFING: "briefing", "resumo do dia", "resumo de hoje", "meu dia", "o que tenho hoje"
 - EMAIL_CMD: começa com "ok N", "envia N", "muda N:", "ignora N"
 - Datas relativas: amanhã=+1 dia, dias da semana=próxima ocorrência futura"""
     async with httpx.AsyncClient(timeout=30) as client:
@@ -275,7 +276,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         tipo = intent.get("tipo", "DESCONHECIDO")
         logger.info(f"Intent: tipo={tipo} titulo={intent.get('titulo')} data={intent.get('data')}")
 
-        if tipo == "ATAS_ES":
+        if tipo == "BRIEFING":
+            await send("⏳ Gerando seu briefing...", bot)
+            await gerar_briefing(bot)
+
+        elif tipo == "ATAS_ES":
             await send("🔍 Buscando atas no PNCP...", bot)
             await send(await buscar_atas_es(), bot)
 
