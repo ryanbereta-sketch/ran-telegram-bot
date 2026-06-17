@@ -139,7 +139,7 @@ Regras:
             "https://api.groq.com/openai/v1/chat/completions",
             headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
             json={
-                "model": "llama-3.1-8b-instant",
+                "model": "llama-3.3-70b-versatile",
                 "max_tokens": 300,
                 "messages": [
                     {"role": "system", "content": system},
@@ -169,7 +169,7 @@ def criar_evento(titulo: str, data: str, hora: str = None) -> None:
     svc = calendar_service()
     if hora:
         start_dt = f"{data}T{hora}:00"
-        end_obj  = datetime.strptime(f"{data} {hora}", "%Y-%m-%d %H:%M") + timedelta(hours=1)
+        end_obj  = datetime.strptime(f"{data} {hora}", "%Y-%m-%d %H:%M") + timedelta(minutes=30)
         end_dt   = end_obj.strftime("%Y-%m-%dT%H:%M:00")
         start = {"dateTime": start_dt, "timeZone": "America/Sao_Paulo"}
         end   = {"dateTime": end_dt,   "timeZone": "America/Sao_Paulo"}
