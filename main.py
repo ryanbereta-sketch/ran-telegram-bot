@@ -149,11 +149,11 @@ Regras:
         )
         resp = r.json()
         content = resp["choices"][0]["message"]["content"].strip()
-        if content.startswith("```"):
-            content = content.split("```")[1]
-            if content.startswith("json"):
-                content = content[4:]
-        return json.loads(content)
+        import re
+        match = re.search(r'\{.*\}', content, re.DOTALL)
+        if not match:
+            raise Exception(f"JSON não encontrado na resposta: {content[:200]}")
+        return json.loads(match.group())
 
 # ── Ações Google ───────────────────────────────────────────────────────────────
 def criar_tarefa(titulo: str, data: str = None) -> None:
@@ -245,6 +245,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     bot   = context.bot
     texto = ""
+    logger.info(f"Mensagem recebida: voz={bool(update.message.voice)} texto={bool(update.message.text)}")
 
     if update.message.voice:
         try:
