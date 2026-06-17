@@ -128,6 +128,7 @@ Responda APENAS JSON válido, sem markdown:
 
 Regras:
 - EVENTO: tem data/hora/dia semana, ou palavras: reunião, meeting, call, almoço, jantar, visita, consulta, compromisso
+- titulo: sempre inclua nomes de pessoas e detalhes relevantes. Ex: "Reunião com Nil", "Almoço com João", "Consulta médica"
 - TAREFA: verbos de ação sem data específica: ligar, pagar, comprar, enviar, fazer, verificar, lembrar
 - EMAIL: "envia email", "manda email", "escreve email" para alguém
 - ATAS_ES: "atas es", "atas espírito santo", "atas estadual", "atas federal", "atas consórcio"
