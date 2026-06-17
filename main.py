@@ -9,7 +9,7 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from threading import Thread
 import httpx
 from telegram import Update
-from telegram.ext import Application, MessageHandler, filters, ContextTypes
+from telegram.ext import Application, MessageHandler, CommandHandler, filters, ContextTypes
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
@@ -406,6 +406,12 @@ async def gerar_briefing(bot) -> None:
     linhas.append("\n_Bom trabalho! 💪_")
     await bot.send_message(chat_id=CHAT_ID, text="\n".join(linhas), parse_mode="Markdown")
 
+async def cmd_briefing(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if update.effective_chat.id != CHAT_ID:
+        return
+    await update.message.reply_text("⏳ Gerando seu briefing...")
+    await gerar_briefing(context.bot)
+
 async def agendador_briefing(bot) -> None:
     enviado_hoje = None
     while True:
@@ -422,6 +428,7 @@ async def agendador_briefing(bot) -> None:
 # ── Main ────────────────────────────────────────────────────────────────────────
 async def run_bot():
     app = Application.builder().token(BOT_TOKEN).build()
+    app.add_handler(CommandHandler("briefing", cmd_briefing))
     app.add_handler(MessageHandler(filters.ALL, handle_message))
     logger.info("Bot RAN iniciado via polling")
     async with app:
