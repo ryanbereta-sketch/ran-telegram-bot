@@ -83,21 +83,10 @@ async def transcribe_voice(file_path: str) -> str:
         )
         return r2.json().get("text", "")
 
-# ── Claude — classificar intenção ───────────────────────────────────────────────
+# ── Groq — classificar intenção ────────────────────────────────────────────────
 async def classify_intent(text: str) -> dict:
     hoje = datetime.now().strftime("%Y-%m-%d")
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": ANTHROPIC_KEY,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-3-5-haiku-20241022",
-                "max_tokens": 300,
-                "system": f"""Classifica mensagens em português do Ryan Bereta.
+    system = f"""Classifica mensagens em português do Ryan Bereta.
 Data de hoje: {hoje}. Fuso: America/Sao_Paulo.
 
 Responda APENAS JSON válido, sem markdown:
@@ -120,14 +109,26 @@ Regras:
 - EMAIL: "envia email", "manda email", "escreve email" para alguém
 - ATAS_ES: "atas es", "atas espírito santo", "atas estadual", "atas federal", "atas consórcio"
 - EMAIL_CMD: começa com "ok N", "envia N", "muda N:", "ignora N"
-- Datas relativas: amanhã=+1 dia, dias da semana=próxima ocorrência futura""",
-                "messages": [{"role": "user", "content": text}],
+- Datas relativas: amanhã=+1 dia, dias da semana=próxima ocorrência futura"""
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
+            json={
+                "model": "llama-3.1-8b-instant",
+                "max_tokens": 300,
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": text},
+                ],
             },
         )
         resp = r.json()
-        if "error" in resp:
-            raise Exception(resp["error"].get("message", str(resp["error"])))
-        content = resp["content"][0]["text"].strip()
+        content = resp["choices"][0]["message"]["content"].strip()
+        if content.startswith("```"):
+            content = content.split("```")[1]
+            if content.startswith("json"):
+                content = content[4:]
         return json.loads(content)
 
 # ── Ações Google ───────────────────────────────────────────────────────────────
