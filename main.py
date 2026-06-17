@@ -350,10 +350,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ── Briefing Matinal ───────────────────────────────────────────────────────────
 async def gerar_briefing(bot) -> None:
     hoje = datetime.now()
-    hoje_str = hoje.strftime("%d/%m/%Y")
-    linhas = [f"☀️ *Bom dia, Ryan!*\n📅 {hoje_str}\n"]
+    dia_semana = ["Segunda","Terça","Quarta","Quinta","Sexta","Sábado","Domingo"][hoje.weekday()]
+    mes = ["janeiro","fevereiro","março","abril","maio","junho","julho","agosto","setembro","outubro","novembro","dezembro"][hoje.month-1]
+    hoje_fmt = f"{dia_semana}, {hoje.day} de {mes} de {hoje.year}"
 
-    # Eventos do dia no Calendar
+    eventos_txt = ""
+    tarefas_txt = ""
+    emails_txt  = ""
+    eventos_lista = []
+    tarefas_lista = []
+
+    # Eventos do dia
     try:
         svc = calendar_service()
         inicio = hoje.strftime("%Y-%m-%dT00:00:00-03:00")
@@ -362,16 +369,14 @@ async def gerar_briefing(bot) -> None:
             calendarId="primary", timeMin=inicio, timeMax=fim,
             singleEvents=True, orderBy="startTime"
         ).execute().get("items", [])
-        if eventos:
-            linhas.append("*📅 Compromissos de hoje:*")
-            for e in eventos:
-                hora = e["start"].get("dateTime", "")
-                hora_fmt = datetime.fromisoformat(hora).strftime("%H:%M") if hora else "Dia todo"
-                linhas.append(f"• {hora_fmt} — {e.get('summary','Sem título')}")
-        else:
-            linhas.append("📅 Nenhum compromisso hoje.")
+        for e in eventos:
+            hora = e["start"].get("dateTime","")
+            hora_fmt = datetime.fromisoformat(hora).strftime("%H:%M") if hora else "Dia todo"
+            eventos_lista.append(f"{hora_fmt} — {e.get('summary','Sem título')}")
+        eventos_txt = "\n".join(eventos_lista) if eventos_lista else "Nenhum compromisso."
     except Exception as ex:
-        logger.error(f"Briefing Calendar erro: {ex}")
+        logger.error(f"Briefing Calendar: {ex}")
+        eventos_txt = "Erro ao buscar agenda."
 
     # Tarefas pendentes
     try:
@@ -379,42 +384,79 @@ async def gerar_briefing(bot) -> None:
         listas = svc.tasklists().list().execute().get("items", [])
         lista_id = next((l["id"] for l in listas if "ASSISTENTE" in l["title"].upper()), listas[0]["id"])
         tarefas = svc.tasks().list(tasklist=lista_id, showCompleted=False).execute().get("items", [])
-        pendentes = [t for t in tarefas if t.get("status") != "completed"]
-        if pendentes:
-            linhas.append("\n*✅ Tarefas pendentes:*")
-            for t in pendentes[:10]:
-                linhas.append(f"• {t.get('title','')}")
-        else:
-            linhas.append("\n✅ Nenhuma tarefa pendente.")
+        tarefas_lista = [t.get("title","") for t in tarefas if t.get("status") != "completed"]
+        tarefas_txt = "\n".join(f"• {t}" for t in tarefas_lista[:15]) if tarefas_lista else "Nenhuma tarefa pendente."
     except Exception as ex:
-        logger.error(f"Briefing Tasks erro: {ex}")
+        logger.error(f"Briefing Tasks: {ex}")
+        tarefas_txt = "Erro ao buscar tarefas."
 
     # Emails não lidos
+    emails_resumo = []
     try:
         svc = gmail_service()
-        msgs = svc.users().messages().list(
-            userId="me", q="is:unread is:inbox", maxResults=10
-        ).execute().get("messages", [])
-        if msgs:
-            linhas.append(f"\n*📧 Emails não lidos: {len(msgs)}*")
-            for m in msgs[:5]:
-                detail = svc.users().messages().get(
-                    userId="me", id=m["id"], format="metadata",
-                    metadataHeaders=["From","Subject"]
-                ).execute()
-                headers = {h["name"]: h["value"] for h in detail.get("payload", {}).get("headers", [])}
-                remetente = headers.get("From","").split("<")[0].strip()[:30]
-                assunto   = headers.get("Subject","Sem assunto")[:50]
-                linhas.append(f"• {remetente}: _{assunto}_")
-            if len(msgs) > 5:
-                linhas.append(f"_(+{len(msgs)-5} emails)_")
-        else:
-            linhas.append("\n📧 Nenhum email não lido.")
+        msgs = svc.users().messages().list(userId="me", q="is:unread is:inbox", maxResults=8).execute().get("messages", [])
+        for m in msgs[:5]:
+            detail = svc.users().messages().get(userId="me", id=m["id"], format="metadata", metadataHeaders=["From","Subject"]).execute()
+            headers = {h["name"]: h["value"] for h in detail.get("payload",{}).get("headers",[])}
+            remetente = headers.get("From","").split("<")[0].strip()[:25]
+            assunto   = headers.get("Subject","Sem assunto")[:50]
+            emails_resumo.append(f"• {remetente}: {assunto}")
+        emails_txt = f"{len(msgs)} não lidos:\n" + "\n".join(emails_resumo) if msgs else "Nenhum email não lido."
     except Exception as ex:
-        logger.error(f"Briefing Gmail erro: {ex}")
+        logger.error(f"Briefing Gmail: {ex}")
+        emails_txt = "Erro ao buscar emails."
 
-    linhas.append("\n_Bom trabalho! 💪_")
-    await bot.send_message(chat_id=CHAT_ID, text="\n".join(linhas), parse_mode="Markdown")
+    # Gerar briefing inteligente com IA
+    prompt = f"""Você é o assistente pessoal de Ryan Bereta, dono da RAN Soluções e Serviços (ES, Brasil).
+Gere um briefing matinal CONCISO e INTELIGENTE para o WhatsApp/Telegram. Use Markdown simples (*negrito*, _itálico_).
+
+Data: {hoje_fmt}
+
+AGENDA DE HOJE:
+{eventos_txt}
+
+TAREFAS PENDENTES:
+{tarefas_txt}
+
+EMAILS NÃO LIDOS:
+{emails_txt}
+
+Formato obrigatório:
+☀️ *BOM DIA, RYAN!*
+{hoje_fmt}
+
+📋 *RESUMO DO DIA*
+[2-3 frases inteligentes destacando prioridades, alertas e foco do dia]
+
+---
+🗓 *AGENDA DE HOJE*
+[lista de compromissos]
+
+---
+✅ *TAREFAS PRIORITÁRIAS*
+[máximo 5 tarefas mais importantes]
+
+---
+📧 *EMAILS*
+[resumo dos emails]
+
+---
+💡 *FOCO DO DIA*
+[1 frase motivacional e objetiva]
+
+Seja direto, use linguagem de executivo. Máximo 3000 caracteres."""
+
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(
+            "https://api.groq.com/openai/v1/chat/completions",
+            headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
+            json={"model": "llama-3.3-70b-versatile", "max_tokens": 1000,
+                  "messages": [{"role": "user", "content": prompt}]},
+        )
+        briefing = r.json()["choices"][0]["message"]["content"].strip()
+
+    for i in range(0, len(briefing), 4000):
+        await bot.send_message(chat_id=CHAT_ID, text=briefing[i:i+4000], parse_mode="Markdown")
 
 async def gerar_briefing_semana(bot) -> None:
     hoje = datetime.now()
