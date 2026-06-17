@@ -411,66 +411,59 @@ async def gerar_briefing(bot) -> None:
         logger.error(f"Briefing Gmail: {ex}")
         emails_txt = "Erro ao buscar emails."
 
-    # Gerar briefing inteligente com IA
-    prompt = f"""Você é um assistente pessoal inteligente especializado em gestão de tempo e produtividade diária. Sua tarefa é analisar os dados do dia do usuário e fornecer um resumo executivo matinal via Telegram que o direcione de forma estratégica para o melhor desempenho do dia.
-
-Seu propósito: não apenas resumir o dia, mas atuar como um estrategista de tempo e energia que identifica oportunidades, riscos e prioridades críticas. Transforme dados brutos em insights acionáveis.
-
-DADOS DO DIA ({hoje_fmt}):
-AGENDA: {eventos_txt}
-TAREFAS PENDENTES: {tarefas_txt}
-EMAILS NÃO LIDOS: {emails_txt}
-
-Estrutura obrigatória da resposta:
-
-☀️ *BOM DIA, RYAN!*
-_{hoje_fmt}_
+    # IA gera apenas análise estratégica + prioridades + foco
+    prompt_ia = f"""Analise os dados do dia de Ryan e responda EXATAMENTE neste formato (sem adicionar ou remover seções):
 
 📋 *ANÁLISE ESTRATÉGICA*
-[Leitura crítica da carga do dia: padrões, sobrecargas, riscos reais, oportunidades. Seja específico com os dados acima — mencione reuniões pelo nome, identifique conflitos, janelas de foco. 3-4 frases cirúrgicas.]
+[3-4 frases diretas: padrões do dia, riscos reais, oportunidades. Mencione reuniões e tarefas pelo nome.]
 
 ---
 🎯 *PRIORIDADES DO DIA*
-[Distinga crítico/urgente de importante/pode esperar. Máximo 4 itens com justificativa de negócio.]
+1. [item] — [por que é crítico]
+2. [item] — [por que é crítico]
+3. [item] — [por que é crítico]
+4. [item] — [por que é crítico]
 
 ---
 ⚡ *GUIA DE AÇÃO*
-[Direcionamentos práticos por bloco de tempo: como se preparar para reuniões chave, quando fazer tarefas importantes, como gerenciar energia entre compromissos.]
+[2-3 direcionamentos práticos por bloco de tempo]
 
 ---
-🗓 *AGENDA*
-[Lista com horários]
+💡 *FOCO DO DIA:* [1 frase poderosa e específica]
 
----
-📧 *EMAILS*
-[Resumo com destaque para urgentes]
+DADOS:
+AGENDA: {eventos_txt}
+TAREFAS: {tarefas_txt}
+EMAILS: {emails_txt}"""
 
----
-💡 *FOCO DO DIA:* [1 frase poderosa e específica para hoje]
-
-Tom: direto, respeitoso, motivador. Use emojis com moderação. Seja honesto sobre desafios reais. Máximo 3500 caracteres."""
-
-    briefing = ""
+    analise = ""
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": "claude-3-haiku-20240307", "max_tokens": 3000, "messages": [{"role": "user", "content": prompt}]},
+                json={"model": "claude-3-haiku-20240307", "max_tokens": 1200, "messages": [{"role": "user", "content": prompt_ia}]},
             )
             resp = r.json()
             if "error" in resp:
                 raise Exception(resp["error"].get("message", str(resp)))
-            briefing = resp["content"][0]["text"].strip()
+            analise = resp["content"][0]["text"].strip()
     except Exception as e:
         logger.warning(f"Claude falhou ({e}), usando Groq")
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
-                json={"model": "llama-3.3-70b-versatile", "max_tokens": 3000, "messages": [{"role": "user", "content": prompt}]},
+                json={"model": "llama-3.3-70b-versatile", "max_tokens": 1200, "messages": [{"role": "user", "content": prompt_ia}]},
             )
-            briefing = r.json()["choices"][0]["message"]["content"].strip()
+            analise = r.json()["choices"][0]["message"]["content"].strip()
+
+    # Monta briefing completo com seções garantidas pelo código
+    briefing = f"☀️ *BOM DIA, RYAN!*\n_{hoje_fmt}_\n\n"
+    briefing += analise + "\n\n"
+    briefing += f"---\n🗓 *AGENDA*\n{eventos_txt}\n\n"
+    briefing += f"---\n✅ *TAREFAS PENDENTES*\n{tarefas_txt}\n\n"
+    briefing += f"---\n📧 *EMAILS*\n{emails_txt}"
 
     for i in range(0, len(briefing), 4000):
         await bot.send_message(chat_id=CHAT_ID, text=briefing[i:i+4000], parse_mode="Markdown")
