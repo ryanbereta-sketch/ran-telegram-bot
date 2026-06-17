@@ -378,13 +378,18 @@ async def gerar_briefing(bot) -> None:
         logger.error(f"Briefing Calendar: {ex}")
         eventos_txt = "Erro ao buscar agenda."
 
-    # Tarefas pendentes
+    # Tarefas pendentes (todas as listas)
     try:
         svc = tasks_service()
         listas = svc.tasklists().list().execute().get("items", [])
-        lista_id = next((l["id"] for l in listas if "ASSISTENTE" in l["title"].upper()), listas[0]["id"])
-        tarefas = svc.tasks().list(tasklist=lista_id, showCompleted=False).execute().get("items", [])
-        tarefas_lista = [t.get("title","") for t in tarefas if t.get("status") != "completed"]
+        tarefas_lista = []
+        for lista in listas:
+            tarefas = svc.tasks().list(
+                tasklist=lista["id"], showCompleted=False, showHidden=False
+            ).execute().get("items", [])
+            for t in tarefas:
+                if t.get("status") != "completed" and t.get("title","").strip():
+                    tarefas_lista.append(t.get("title",""))
         tarefas_txt = "\n".join(f"• {t}" for t in tarefas_lista[:15]) if tarefas_lista else "Nenhuma tarefa pendente."
     except Exception as ex:
         logger.error(f"Briefing Tasks: {ex}")
@@ -504,13 +509,18 @@ async def gerar_briefing_semana(bot) -> None:
     try:
         svc = tasks_service()
         listas = svc.tasklists().list().execute().get("items", [])
-        lista_id = next((l["id"] for l in listas if "ASSISTENTE" in l["title"].upper()), listas[0]["id"])
-        tarefas = svc.tasks().list(tasklist=lista_id, showCompleted=False).execute().get("items", [])
-        pendentes = [t for t in tarefas if t.get("status") != "completed"]
+        pendentes = []
+        for lista in listas:
+            tarefas = svc.tasks().list(
+                tasklist=lista["id"], showCompleted=False, showHidden=False
+            ).execute().get("items", [])
+            for t in tarefas:
+                if t.get("status") != "completed" and t.get("title","").strip():
+                    pendentes.append(t.get("title",""))
         if pendentes:
             linhas.append(f"\n*✅ Tarefas pendentes ({len(pendentes)}):*")
             for t in pendentes[:10]:
-                linhas.append(f"• {t.get('title','')}")
+                linhas.append(f"• {t}")
         else:
             linhas.append("\n✅ Nenhuma tarefa pendente.")
     except Exception as ex:
