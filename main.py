@@ -240,91 +240,102 @@ async def buscar_atas_es() -> str:
 
 # ── Handler principal ───────────────────────────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or update.effective_chat.id != CHAT_ID:
-        return
-
-    bot   = context.bot
-    texto = ""
-    logger.info(f"Mensagem recebida: voz={bool(update.message.voice)} texto={bool(update.message.text)}")
-
-    if update.message.voice:
-        try:
-            tg_file = await bot.get_file(update.message.voice.file_id)
-            texto = await transcribe_voice(tg_file)
-            if not texto:
-                await send("⚠️ Não consegui transcrever. Tente por texto.", bot)
-                return
-            await send(f'🎤 _"{texto}"_', bot)
-        except Exception as e:
-            await send(f"⚠️ Erro no áudio: {e}", bot)
-            return
-    elif update.message.text:
-        texto = update.message.text.strip()
-    else:
-        return
-
     try:
-        intent = await classify_intent(texto)
+        if not update.message or update.effective_chat.id != CHAT_ID:
+            return
+
+        bot   = context.bot
+        texto = ""
+        logger.info(f"Mensagem recebida: voz={bool(update.message.voice)} texto={bool(update.message.text)}")
+
+        if update.message.voice:
+            try:
+                tg_file = await bot.get_file(update.message.voice.file_id)
+                texto = await transcribe_voice(tg_file)
+                if not texto:
+                    await send("⚠️ Não consegui transcrever. Tente por texto.", bot)
+                    return
+                await send(f'🎤 _"{texto}"_', bot)
+            except Exception as e:
+                await send(f"⚠️ Erro no áudio: {e}", bot)
+                return
+        elif update.message.text:
+            texto = update.message.text.strip()
+        else:
+            return
+
+        logger.info(f"Classificando: {texto[:80]}")
+        try:
+            intent = await classify_intent(texto)
+        except Exception as e:
+            logger.error(f"Erro classify_intent: {e}")
+            await send(f"⚠️ Erro ao classificar: {e}", bot)
+            return
+
+        tipo = intent.get("tipo", "DESCONHECIDO")
+        logger.info(f"Intent: tipo={tipo} titulo={intent.get('titulo')} data={intent.get('data')}")
+
+        if tipo == "ATAS_ES":
+            await send("🔍 Buscando atas no PNCP...", bot)
+            await send(await buscar_atas_es(), bot)
+
+        elif tipo == "EMAIL":
+            try:
+                criar_rascunho(intent.get("destinatario",""), intent.get("assunto","Sem assunto"), intent.get("corpo",""))
+                await send(f"📧 *Email pronto!*\nPara: {intent.get('destinatario','')}\nAssunto: {intent.get('assunto','')}\n\n👆 Abra e envie:\nhttps://mail.google.com/mail/u/0/#drafts", bot)
+            except Exception as e:
+                await send(f"⚠️ Erro ao criar rascunho: {e}", bot)
+
+        elif tipo == "TAREFA":
+            try:
+                criar_tarefa(intent["titulo"], intent.get("data"))
+                msg = f"✅ *Tarefa criada:* {intent['titulo']}"
+                if intent.get("data"): msg += f"\n📅 Vence: {intent['data']}"
+                await send(msg, bot)
+            except Exception as e:
+                await send(f"⚠️ Erro ao criar tarefa: {e}", bot)
+
+        elif tipo == "EVENTO":
+            if not intent.get("data"):
+                await send("📅 Qual é a data do compromisso?", bot)
+                return
+            try:
+                criar_evento(intent["titulo"], intent["data"], intent.get("hora"))
+                hora_str = f" às {intent['hora']}" if intent.get("hora") else ""
+                await send(f"📅 *Evento criado:* {intent['titulo']}\n🗓️ {intent['data']}{hora_str}", bot)
+            except Exception as e:
+                await send(f"⚠️ Erro ao criar evento: {e}", bot)
+
+        elif tipo == "EMAIL_CMD":
+            try:
+                with open(PENDENTES_FILE) as f:
+                    pendentes = json.load(f)
+            except Exception:
+                pendentes = []
+            num  = intent.get("cmd_num")
+            acao = intent.get("cmd_acao")
+            if not num or num > len(pendentes):
+                await send(f"⚠️ Email [{num}] não encontrado.", bot)
+                return
+            item = pendentes[num-1]
+            if acao == "ignora":
+                item["status"] = "ignorado"
+                await send(f"🗑️ Email [{num}] descartado.", bot)
+            elif acao in ("ok","envia"):
+                item["status"] = "enviado"
+                await send(f"✅ Abra o Gmail e envie:\n_{item.get('assunto','')}_\nhttps://mail.google.com/mail/u/0/#drafts", bot)
+            with open(PENDENTES_FILE, "w") as f:
+                json.dump(pendentes, f, ensure_ascii=False, indent=2)
+
+        else:
+            await send("🤔 Não entendi. Exemplos:\n• _reunião com Tiago sexta às 14h_\n• _ligar para o contador amanhã_\n• _envia email para joao@empresa.com assunto: Proposta_\n• _atas es_", bot)
+
     except Exception as e:
-        await send(f"⚠️ Erro ao processar: {e}", bot)
-        return
-
-    tipo = intent.get("tipo", "DESCONHECIDO")
-
-    if tipo == "ATAS_ES":
-        await send("🔍 Buscando atas no PNCP...", bot)
-        await send(await buscar_atas_es(), bot)
-
-    elif tipo == "EMAIL":
+        logger.error(f"Erro não tratado: {e}", exc_info=True)
         try:
-            criar_rascunho(intent.get("destinatario",""), intent.get("assunto","Sem assunto"), intent.get("corpo",""))
-            await send(f"📧 *Email pronto!*\nPara: {intent.get('destinatario','')}\nAssunto: {intent.get('assunto','')}\n\n👆 Abra e envie:\nhttps://mail.google.com/mail/u/0/#drafts", bot)
-        except Exception as e:
-            await send(f"⚠️ Erro ao criar rascunho: {e}", bot)
-
-    elif tipo == "TAREFA":
-        try:
-            criar_tarefa(intent["titulo"], intent.get("data"))
-            msg = f"✅ *Tarefa criada:* {intent['titulo']}"
-            if intent.get("data"): msg += f"\n📅 Vence: {intent['data']}"
-            await send(msg, bot)
-        except Exception as e:
-            await send(f"⚠️ Erro ao criar tarefa: {e}", bot)
-
-    elif tipo == "EVENTO":
-        if not intent.get("data"):
-            await send("📅 Qual é a data do compromisso?", bot)
-            return
-        try:
-            criar_evento(intent["titulo"], intent["data"], intent.get("hora"))
-            hora_str = f" às {intent['hora']}" if intent.get("hora") else ""
-            await send(f"📅 *Evento criado:* {intent['titulo']}\n🗓️ {intent['data']}{hora_str}", bot)
-        except Exception as e:
-            await send(f"⚠️ Erro ao criar evento: {e}", bot)
-
-    elif tipo == "EMAIL_CMD":
-        try:
-            with open(PENDENTES_FILE) as f:
-                pendentes = json.load(f)
+            await context.bot.send_message(chat_id=CHAT_ID, text=f"⚠️ Erro inesperado: {e}")
         except Exception:
-            pendentes = []
-        num  = intent.get("cmd_num")
-        acao = intent.get("cmd_acao")
-        if not num or num > len(pendentes):
-            await send(f"⚠️ Email [{num}] não encontrado.", bot)
-            return
-        item = pendentes[num-1]
-        if acao == "ignora":
-            item["status"] = "ignorado"
-            await send(f"🗑️ Email [{num}] descartado.", bot)
-        elif acao in ("ok","envia"):
-            item["status"] = "enviado"
-            await send(f"✅ Abra o Gmail e envie:\n_{item.get('assunto','')}_\nhttps://mail.google.com/mail/u/0/#drafts", bot)
-        with open(PENDENTES_FILE, "w") as f:
-            json.dump(pendentes, f, ensure_ascii=False, indent=2)
-
-    else:
-        await send("🤔 Não entendi. Exemplos:\n• _reunião com Tiago sexta às 14h_\n• _ligar para o contador amanhã_\n• _envia email para joao@empresa.com assunto: Proposta_\n• _atas es_", bot)
+            pass
 
 # ── Main ────────────────────────────────────────────────────────────────────────
 async def run_bot():
