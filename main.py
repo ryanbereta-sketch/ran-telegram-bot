@@ -159,7 +159,7 @@ Regras:
 def criar_tarefa(titulo: str, data: str = None) -> None:
     svc = tasks_service()
     listas = svc.tasklists().list().execute().get("items", [])
-    lista_id = next((l["id"] for l in listas if "RYAN" in l["title"].upper()), listas[0]["id"])
+    lista_id = next((l["id"] for l in listas if "ASSISTENTE" in l["title"].upper()), listas[0]["id"])
     body = {"title": titulo}
     if data:
         body["due"] = f"{data}T00:00:00Z"
