@@ -137,7 +137,7 @@ def criar_tarefa(titulo: str, data: str = None) -> None:
     lista_id = next((l["id"] for l in listas if "RYAN" in l["title"].upper()), listas[0]["id"])
     body = {"title": titulo}
     if data:
-        body["due"] = f"{data}T00:00:00.000Z"
+        body["due"] = f"{data}T00:00:00Z"
     svc.tasks().insert(tasklist=lista_id, body=body).execute()
 
 def criar_evento(titulo: str, data: str, hora: str = None) -> None:
