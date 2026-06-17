@@ -456,7 +456,7 @@ Tom: direto, respeitoso, motivador. Use emojis com moderação. Seja honesto sob
             r = await client.post(
                 "https://api.anthropic.com/v1/messages",
                 headers={"x-api-key": ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                json={"model": "claude-3-haiku-20240307", "max_tokens": 1500, "messages": [{"role": "user", "content": prompt}]},
+                json={"model": "claude-3-haiku-20240307", "max_tokens": 3000, "messages": [{"role": "user", "content": prompt}]},
             )
             resp = r.json()
             if "error" in resp:
@@ -468,7 +468,7 @@ Tom: direto, respeitoso, motivador. Use emojis com moderação. Seja honesto sob
             r = await client.post(
                 "https://api.groq.com/openai/v1/chat/completions",
                 headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
-                json={"model": "llama-3.3-70b-versatile", "max_tokens": 1500, "messages": [{"role": "user", "content": prompt}]},
+                json={"model": "llama-3.3-70b-versatile", "max_tokens": 3000, "messages": [{"role": "user", "content": prompt}]},
             )
             briefing = r.json()["choices"][0]["message"]["content"].strip()
 
