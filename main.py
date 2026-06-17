@@ -452,12 +452,22 @@ _{hoje_fmt}_
 
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile", "max_tokens": 1500,
-                  "messages": [{"role": "user", "content": prompt}]},
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-haiku-4-5-20251001",
+                "max_tokens": 1500,
+                "messages": [{"role": "user", "content": prompt}],
+            },
         )
-        briefing = r.json()["choices"][0]["message"]["content"].strip()
+        resp = r.json()
+        if "error" in resp:
+            raise Exception(resp["error"].get("message", str(resp)))
+        briefing = resp["content"][0]["text"].strip()
 
     for i in range(0, len(briefing), 4000):
         await bot.send_message(chat_id=CHAT_ID, text=briefing[i:i+4000], parse_mode="Markdown")
