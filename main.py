@@ -71,9 +71,11 @@ async def send(text: str, bot):
 
 # ── Groq Whisper ───────────────────────────────────────────────────────────────
 async def transcribe_voice(file_path: str) -> str:
-    url = f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
+    # PTB 21.x retorna file_path como URL completa
+    url = file_path if file_path.startswith("https://") else f"https://api.telegram.org/file/bot{BOT_TOKEN}/{file_path}"
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.get(url)
+        r.raise_for_status()
         audio_bytes = r.content
         r2 = await client.post(
             "https://api.groq.com/openai/v1/audio/transcriptions",
@@ -81,7 +83,10 @@ async def transcribe_voice(file_path: str) -> str:
             files={"file": ("voice.ogg", audio_bytes, "audio/ogg")},
             data={"model": "whisper-large-v3-turbo", "language": "pt"},
         )
-        return r2.json().get("text", "")
+        r2.raise_for_status()
+        result = r2.json()
+        logger.info(f"Groq transcription result: {result}")
+        return result.get("text", "")
 
 # ── Groq — classificar intenção ────────────────────────────────────────────────
 async def classify_intent(text: str) -> dict:
