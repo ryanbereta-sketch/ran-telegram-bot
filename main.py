@@ -407,55 +407,67 @@ async def gerar_briefing(bot) -> None:
         emails_txt = "Erro ao buscar emails."
 
     # Gerar briefing inteligente com IA
-    prompt = f"""Você é Ana, consultora sênior de produtividade e prioridades de Ryan Bereta, dono da RAN Soluções e Serviços (Espírito Santo, Brasil) — empresa de licitações, atas de registro de preços e serviços para prefeituras e consórcios públicos.
+    prompt = f"""Você é Ana, consultora estratégica de Ryan Bereta (RAN Soluções, ES — licitações e atas de registro de preços para prefeituras e consórcios).
 
-Seu papel: analisar a agenda, tarefas e emails de Ryan e entregar um briefing matinal ESTRATÉGICO — como uma consultora que conhece o negócio e sabe o que realmente importa. Seja direta, perspicaz e sem enrolação. Use Markdown para Telegram (*negrito*, _itálico_).
+DADOS DO DIA ({hoje_fmt}):
+AGENDA: {eventos_txt}
+TAREFAS: {tarefas_txt}
+EMAILS: {emails_txt}
 
-Data: {hoje_fmt}
+INSTRUÇÕES OBRIGATÓRIAS:
+1. NÃO copie os dados acima. ANALISE-OS e escreva com suas próprias palavras.
+2. Identifique o padrão do dia: é um dia pesado? De relacionamento? Financeiro? Operacional?
+3. Aponte riscos reais: o que pode dar errado hoje? O que Ryan não pode esquecer?
+4. Escolha as 3 prioridades mais críticas com justificativa de negócio.
+5. Tom: consultora direta, sem elogios, sem "ótimo dia", sem repetição de dados.
 
-AGENDA DE HOJE:
-{eventos_txt}
+EXEMPLO DE ANÁLISE BOA (não copie, inspire-se):
+"Agenda carregada de manhã com três reuniões antes do meio-dia — risco de chegar na reunião com Tiago sem energia. A tarefa de retorno ao Dr. Pedro precisa ser resolvida antes do almoço ou vai atrasar o processo. Foco da tarde: fechar proposta pendente."
 
-TAREFAS PENDENTES:
-{tarefas_txt}
+EXEMPLO DE ANÁLISE RUIM (evite):
+"Você tem reunião às 07:30 com Tiago e almoço às 12:00 com Nil."
 
-EMAILS NÃO LIDOS:
-{emails_txt}
-
-Gere o briefing neste formato:
-
+FORMATO DE SAÍDA:
 ☀️ *BOM DIA, RYAN!*
 _{hoje_fmt}_
 
 📋 *ANÁLISE DO DIA*
-[3-4 frases como consultora: identifique o tom do dia, riscos, oportunidades, o que não pode escorregar. Seja cirúrgica — se há reunião importante, diga o que precisa acontecer nela. Se há tarefa urgente, nomeie. Se a agenda está pesada, alerte. Se está tranquila, sugira o que avançar.]
+[sua análise original aqui — 3 frases no máximo, diretas e inteligentes]
 
 ---
 🗓 *AGENDA*
-[lista com horários e compromissos]
+[lista simples com horários]
 
 ---
-🎯 *TOP 3 PRIORIDADES DE HOJE*
-[escolha as 3 ações mais críticas do dia entre tarefas e reuniões — com 1 frase explicando o PORQUÊ de cada uma ser prioritária]
+🎯 *TOP 3 PRIORIDADES*
+1. [item] — [por que é crítico hoje]
+2. [item] — [por que é crítico hoje]
+3. [item] — [por que é crítico hoje]
 
 ---
-📧 *CAIXA DE ENTRADA*
-[resumo dos emails não lidos — destaque se algum parece urgente]
+📧 *EMAILS ({emails_txt[:50]})*
 
 ---
-💡 *FOCO*
-[1 frase curta e poderosa para o dia — como uma consultora que quer resultado]
+💡 *FOCO:* [1 frase poderosa]"""
 
-Máximo 3500 caracteres. Tom: profissional, direto, sem bajulação."""
-
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
-            "https://api.groq.com/openai/v1/chat/completions",
-            headers={"Authorization": f"Bearer {GROQ_KEY}", "Content-Type": "application/json"},
-            json={"model": "llama-3.3-70b-versatile", "max_tokens": 1000,
-                  "messages": [{"role": "user", "content": prompt}]},
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": ANTHROPIC_KEY,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 1500,
+                "messages": [{"role": "user", "content": prompt}],
+            },
         )
-        briefing = r.json()["choices"][0]["message"]["content"].strip()
+        resp = r.json()
+        if "error" in resp:
+            raise Exception(resp["error"].get("message", str(resp)))
+        briefing = resp["content"][0]["text"].strip()
 
     for i in range(0, len(briefing), 4000):
         await bot.send_message(chat_id=CHAT_ID, text=briefing[i:i+4000], parse_mode="Markdown")
