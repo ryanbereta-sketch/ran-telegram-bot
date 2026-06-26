@@ -556,4 +556,10 @@ async def run_bot():
 
 if __name__ == "__main__":
     start_health_server()
-    asyncio.run(run_bot())
+    while True:
+        try:
+            asyncio.run(run_bot())
+        except Exception as e:
+            logger.error(f"Bot caiu: {e}. Reiniciando em 10s...")
+            import time
+            time.sleep(10)
