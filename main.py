@@ -229,14 +229,14 @@ async def buscar_atas_es(filtro: str = "") -> str:
                 filtro = real
                 break
     todas = []
-    async with httpx.AsyncClient(timeout=15) as client:
-        for pagina in range(1, 20):
+    async with httpx.AsyncClient(timeout=20) as client:
+        for pagina in range(1, 6):
             try:
                 r = await client.get(PNCP_BASE, params={
                     "dataInicial": "20260101", "dataFinal": hoje,
-                    "pagina": pagina, "tamanhoPagina": 20,
+                    "pagina": pagina, "tamanhoPagina": 50,
                     "codigoModalidadeContratacao": 6, "uf": "ES",
-                }, timeout=15)
+                }, timeout=20)
                 data = r.json()
                 items = data.get("data", [])
             except Exception:
@@ -333,9 +333,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await gerar_briefing_semana(bot)
 
         elif tipo == "ATAS_ES":
-            await send("🔍 Buscando atas no PNCP...", bot)
+            msg_busca = await bot.send_message(chat_id=CHAT_ID, text="🔍 Buscando atas no PNCP... aguarde até 30s")
             filtro = intent.get("titulo", "") or ""
-            await send(await buscar_atas_es(filtro=filtro), bot)
+            resultado = await buscar_atas_es(filtro=filtro)
+            await bot.delete_message(chat_id=CHAT_ID, message_id=msg_busca.message_id)
+            await send(resultado, bot)
 
         elif tipo == "EMAIL":
             try:
