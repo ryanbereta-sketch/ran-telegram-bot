@@ -192,7 +192,21 @@ def criar_rascunho(para: str, assunto: str, corpo: str) -> None:
 # ── Busca PNCP ES ───────────────────────────────────────────────────────────────
 async def buscar_atas_es(filtro: str = "") -> str:
     hoje = datetime.now().strftime("%Y%m%d")
-    CKW_CONSORCIO = ["consorcio", "consórcio", "cim", "polinorte", "cigab", "civap", "cimares", "cimsol"]
+    CKW_CONSORCIO = ["consorcio", "consórcio", "cim", "polinorte", "cigab", "civap", "cimares", "cimsol", "regiao norte", "região norte", "regiao sul", "região sul"]
+    # Mapa de nomes populares para termos de busca reais no PNCP
+    ALIAS = {
+        "polinorte": "norte",
+        "cigab": "cigab",
+        "civap": "civap",
+        "cimares": "cimares",
+        "cimsol": "cimsol",
+    }
+    # Traduz o filtro popular para o termo real
+    if filtro:
+        for alias, real in ALIAS.items():
+            if alias in filtro.lower():
+                filtro = real
+                break
     todas = []
     async with httpx.AsyncClient(timeout=15) as client:
         for pagina in range(1, 20):
