@@ -333,14 +333,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await gerar_briefing_semana(bot)
 
         elif tipo == "ATAS_ES":
-            msg_busca = await bot.send_message(chat_id=CHAT_ID, text="🔍 Buscando atas no PNCP... aguarde até 30s")
+            await send("🔍 Consultando PNCP...", bot)
             filtro = intent.get("titulo", "") or ""
-            # ignora palavras genéricas que não são filtros de órgão
             palavras_genericas = ["atas", "ata", "es", "espírito santo", "espirito santo", "pncp", "none"]
             if filtro.lower().strip() in palavras_genericas:
                 filtro = ""
-            resultado = await buscar_atas_es(filtro=filtro)
-            await bot.delete_message(chat_id=CHAT_ID, message_id=msg_busca.message_id)
+            try:
+                resultado = await asyncio.wait_for(buscar_atas_es(filtro=filtro), timeout=25)
+            except asyncio.TimeoutError:
+                resultado = "⚠️ O PNCP demorou demais para responder. Tente novamente em alguns minutos ou acesse diretamente: https://pncp.gov.br"
+            except Exception as e:
+                resultado = f"⚠️ Erro ao consultar PNCP: {e}\nAcesse diretamente: https://pncp.gov.br"
             await send(resultado, bot)
 
         elif tipo == "EMAIL":
