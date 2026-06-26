@@ -131,7 +131,7 @@ Regras:
 - titulo: sempre inclua nomes de pessoas e detalhes relevantes. Ex: "Reunião com Nil", "Almoço com João", "Consulta médica"
 - TAREFA: verbos de ação sem data específica: ligar, pagar, comprar, enviar, fazer, verificar, lembrar
 - EMAIL: "envia email", "manda email", "escreve email" para alguém
-- ATAS_ES: "atas es", "atas espírito santo", "atas estadual", "atas federal", "atas consórcio"
+- ATAS_ES: "atas es", "atas espírito santo", "atas estadual", "atas federal", "atas consórcio", "atas polinorte", "atas [nome de órgão]". Quando houver nome de órgão ou consórcio específico, coloque-o no campo "titulo"
 - BRIEFING: "briefing", "resumo do dia", "resumo de hoje", "meu dia", "o que tenho hoje"
 - BRIEFING_SEMANA: "resumo da semana", "o que tenho essa semana", "agenda da semana", "semana"
 - EMAIL_CMD: começa com "ok N", "envia N", "muda N:", "ignora N"
@@ -190,52 +190,64 @@ def criar_rascunho(para: str, assunto: str, corpo: str) -> None:
     svc.users().drafts().create(userId="me", body={"message": {"raw": raw}}).execute()
 
 # ── Busca PNCP ES ───────────────────────────────────────────────────────────────
-async def buscar_atas_es() -> str:
+async def buscar_atas_es(filtro: str = "") -> str:
     hoje = datetime.now().strftime("%Y%m%d")
-    res  = {"estadual": [], "federal": [], "consorcio": []}
-    CKW  = ["consorcio", "consórcio", "cim", "polinorte"]
-    async with httpx.AsyncClient(timeout=10) as client:
-        for pagina in range(1, 10):
+    CKW_CONSORCIO = ["consorcio", "consórcio", "cim", "polinorte", "cigab", "civap", "cimares", "cimsol"]
+    todas = []
+    async with httpx.AsyncClient(timeout=15) as client:
+        for pagina in range(1, 20):
             try:
                 r = await client.get(PNCP_BASE, params={
                     "dataInicial": "20260101", "dataFinal": hoje,
-                    "pagina": pagina, "tamanhoPagina": 10,
+                    "pagina": pagina, "tamanhoPagina": 20,
                     "codigoModalidadeContratacao": 6, "uf": "ES",
-                }, timeout=10)
-                items = r.json().get("data", [])
+                }, timeout=15)
+                data = r.json()
+                items = data.get("data", [])
             except Exception:
                 break
             if not items:
                 break
             for item in items:
-                if not item.get("srp"):
-                    continue
-                esfera = item.get("orgaoEntidade", {}).get("esferaId", "")
                 orgao  = item.get("orgaoEntidade", {}).get("razaoSocial", "")
                 objeto = item.get("objetoCompra", "")
                 cnpj   = item.get("orgaoEntidade", {}).get("cnpj", "")
                 ano    = item.get("anoCompra", "")
                 seq    = item.get("sequencialCompra", "")
-                entry  = {"orgao": orgao[:50], "objeto": objeto[:80],
-                          "valor": item.get("valorTotalEstimado", 0),
-                          "link": f"https://pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}"}
-                if esfera == "E":
-                    res["estadual"].append(entry)
-                elif esfera == "F":
-                    res["federal"].append(entry)
-                elif esfera in ["N","M"] and any(k in orgao.lower() for k in CKW):
-                    res["consorcio"].append(entry)
-    total = sum(len(v) for v in res.values())
-    if not total:
-        return "❌ Nenhuma ata SRP encontrada no ES."
-    linhas = ["📋 *ATAS PNCP — Espírito Santo 2026*\n"]
-    for tipo, emoji in [("estadual","🏛️ ESTADUAIS"),("federal","🇧🇷 FEDERAIS"),("consorcio","🤝 CONSÓRCIOS")]:
-        lista = res[tipo]
+                esfera = item.get("orgaoEntidade", {}).get("esferaId", "")
+                # filtro opcional por nome de órgão ou objeto
+                if filtro and filtro.lower() not in orgao.lower() and filtro.lower() not in objeto.lower():
+                    continue
+                todas.append({
+                    "orgao": orgao[:60],
+                    "objeto": objeto[:100],
+                    "valor": item.get("valorTotalEstimado", 0),
+                    "esfera": esfera,
+                    "consorcio": any(k in orgao.lower() for k in CKW_CONSORCIO),
+                    "link": f"https://pncp.gov.br/app/editais/{cnpj}/{ano}/{seq}"
+                })
+
+    if not todas:
+        return "❌ Nenhuma ata encontrada no ES para o período."
+
+    # Separar por categoria
+    estaduais  = [i for i in todas if i["esfera"] == "E"]
+    federais   = [i for i in todas if i["esfera"] == "F"]
+    consorcios = [i for i in todas if i["consorcio"]]
+    municipais = [i for i in todas if i["esfera"] == "M" and not i["consorcio"]]
+
+    linhas = [f"📋 *ATAS PNCP — ES 2026* ({len(todas)} encontradas)\n"]
+    for lista, emoji, label in [
+        (consorcios, "🤝", "CONSÓRCIOS"),
+        (estaduais,  "🏛️", "ESTADUAIS"),
+        (municipais, "🏙️", "MUNICIPAIS"),
+        (federais,   "🇧🇷", "FEDERAIS"),
+    ]:
         if not lista: continue
-        linhas.append(f"\n*{emoji} ({len(lista)})*")
+        linhas.append(f"\n*{emoji} {label} ({len(lista)})*")
         for i, item in enumerate(lista[:5], 1):
             val = f"R$ {item['valor']:,.0f}".replace(",",".") if item["valor"] else "Valor n/d"
-            linhas += [f"\n{i}. {item['orgao']}", f"📌 {item['objeto']}", f"💰 {val}", f"🔗 {item['link']}"]
+            linhas += [f"\n{i}. {item['orgao']}", f"📌 {item['objeto'][:80]}", f"💰 {val}", f"🔗 {item['link']}"]
         if len(lista) > 5:
             linhas.append(f"_(+{len(lista)-5} atas)_")
     return "\n".join(linhas)
@@ -287,7 +299,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         elif tipo == "ATAS_ES":
             await send("🔍 Buscando atas no PNCP...", bot)
-            await send(await buscar_atas_es(), bot)
+            filtro = intent.get("titulo", "") or ""
+            await send(await buscar_atas_es(filtro=filtro), bot)
 
         elif tipo == "EMAIL":
             try:
