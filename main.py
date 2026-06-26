@@ -194,14 +194,14 @@ async def buscar_atas_es() -> str:
     hoje = datetime.now().strftime("%Y%m%d")
     res  = {"estadual": [], "federal": [], "consorcio": []}
     CKW  = ["consorcio", "consórcio", "cim", "polinorte"]
-    async with httpx.AsyncClient(timeout=30) as client:
-        for pagina in range(1, 30):
+    async with httpx.AsyncClient(timeout=10) as client:
+        for pagina in range(1, 10):
             try:
                 r = await client.get(PNCP_BASE, params={
                     "dataInicial": "20260101", "dataFinal": hoje,
                     "pagina": pagina, "tamanhoPagina": 10,
                     "codigoModalidadeContratacao": 6, "uf": "ES",
-                })
+                }, timeout=10)
                 items = r.json().get("data", [])
             except Exception:
                 break
