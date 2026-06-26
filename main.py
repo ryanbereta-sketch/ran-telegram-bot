@@ -192,19 +192,40 @@ def criar_rascunho(para: str, assunto: str, corpo: str) -> None:
 # ── Busca PNCP ES ───────────────────────────────────────────────────────────────
 async def buscar_atas_es(filtro: str = "") -> str:
     hoje = datetime.now().strftime("%Y%m%d")
-    CKW_CONSORCIO = ["consorcio", "consórcio", "cim", "polinorte", "cigab", "civap", "cimares", "cimsol", "regiao norte", "região norte", "regiao sul", "região sul"]
+    CKW_CONSORCIO = ["consorcio", "consórcio", "cim", "polinorte", "regiao norte", "região norte", "noroeste", "expandida sul", "guandu", "itauninhas", "pedra azul", "polo sul", "caparao", "caparão", "cisabes", "cointer", "condesul", "condoeste", "prodnorte", "vales"]
     # Mapa de nomes populares para termos de busca reais no PNCP
     ALIAS = {
         "polinorte": "norte",
-        "cigab": "cigab",
-        "civap": "civap",
-        "cimares": "cimares",
-        "cimsol": "cimsol",
+        "cim norte": "norte",
+        "cimnorte": "norte",
+        "cim noroeste": "noroeste",
+        "cim expandida sul": "expandida sul",
+        "expandida sul": "expandida sul",
+        "cim guandu": "guandu",
+        "guandu": "guandu",
+        "cim itauninhas": "itauninhas",
+        "itauninhas": "itauninhas",
+        "cim pedra azul": "pedra azul",
+        "pedra azul": "pedra azul",
+        "cim polo sul": "polo sul",
+        "polo sul": "polo sul",
+        "cim caparao": "caparao",
+        "cim caparão": "caparão",
+        "caparao": "caparao",
+        "cis caparao": "caparao",
+        "cisabes": "cisabes",
+        "cointer": "cointer",
+        "condesul": "condesul",
+        "condoeste": "condoeste",
+        "prodnorte": "prodnorte",
+        "vales e cafe": "vales",
+        "vales e café": "vales",
     }
     # Traduz o filtro popular para o termo real
     if filtro:
+        filtro_lower = filtro.lower()
         for alias, real in ALIAS.items():
-            if alias in filtro.lower():
+            if alias in filtro_lower:
                 filtro = real
                 break
     todas = []
